@@ -1,65 +1,89 @@
-# diagrams
-```mermaid
 classDiagram
-    class User {
-        <<abstract>>
-        #id: str
-        #name: str
-        #password: str
-        +login(password) bool
-        +logout()
-        +role()* str
-    }
-    class Passenger {
-        -rating: float
-        +requestTrip(pickup, dropoff) Trip
-        +payTrip(trip, payment)
-    }
-    class Driver {
-        -licenseNo: str
-        -isAvailable: bool
-        +acceptTrip(trip)
-        +completeTrip(trip)
-    }
-    class Vehicle {
-        -plateNumber: str
-        #model: str
-        +getDetails() str
-    }
-    class Trip {
-        -tripId: str
-        -fare: float
-        -status: str
-        +calculateFare() float
-        +addWaypoint(waypoint)
-    }
-    class Waypoint {
-        -lat: float
-        -lng: float
-        -orderIndex: int
-    }
-    class Payment {
-        <<abstract>>
-        #amount: float
-        #paid: bool
-        +pay()* bool
-    }
-    class CreditCardPayment {
-        -cardLast4: str
-        +pay() bool
-    }
-    class WalletPayment {
-        -walletBalance: float
-        +pay() bool
+    class Project {
+        -projectId: str
+        +name: str
     }
 
-    User <|-- Passenger
-    User <|-- Driver
-    Driver "1" o-- "0..1" Vehicle : owns
-    Passenger "1" --> "0..*" Trip : requests
-    Driver "0..1" --> "0..*" Trip : drives
-    Trip "1" *-- "2..*" Waypoint : contains
-    Trip "1" o-- "0..1" Payment : settled by
-    Payment <|-- CreditCardPayment
-    Payment <|-- WalletPayment
-```
+    class TestNode {
+        <<abstract>>
+        +name: str
+        +run()* TestResult
+    }
+
+    class TestSuite {
+        +add(node: TestNode)
+        +run() TestResult
+    }
+
+    class TestCase {
+        -timeoutSeconds: int = 30
+        +run() TestResult
+    }
+
+    class TestResult {
+        +passed: bool
+        +duration: float
+        #errorLog: str
+    }
+
+    class TestRunner {
+        -strategy: SchedulingStrategy
+        +setStrategy(strategy: SchedulingStrategy)
+        +execute()
+    }
+
+    class SchedulingStrategy {
+        <<interface>>
+        +schedule(cases: list)
+    }
+
+    class ParallelStrategy {
+        -maxWorkers: int
+        +schedule(cases: list)
+    }
+
+    class PriorityStrategy {
+        -minPriority: int
+        +schedule(cases: list)
+    }
+
+    class WorkerNode {
+        #ipAddress: str
+        #isBusy: bool
+    }
+
+    class Notifier {
+        <<abstract>>
+        #endpoint: str
+        +send(result: TestResult)* bool
+        +formatSummary(result: TestResult) str
+    }
+
+    class SlackNotifier {
+        -channel: str
+        +send(result: TestResult) bool
+    }
+
+    class EmailNotifier {
+        -recipients: list
+        +send(result: TestResult) bool
+    }
+
+    %% 1. 组合模式与生命周期 (Composition & Composite Pattern)
+    Project "1" *-- "1..*" TestSuite : contains
+    TestNode <|-- TestSuite
+    TestNode <|-- TestCase
+    TestSuite "1" o-- "0..*" TestNode : aggregates
+
+    %% 2. 调度与策略模式 (Strategy Pattern & Aggregation)
+    TestRunner "0..1" --> "0..*" TestCase : executes
+    TestRunner "1" o-- "1" SchedulingStrategy : uses
+    SchedulingStrategy <|.. ParallelStrategy
+    SchedulingStrategy <|.. PriorityStrategy
+    TestRunner "0..1" o-- "0..*" WorkerNode : manages
+
+    %% 3. 结果与通知多态 (Association & Inheritance)
+    TestCase "1" --> "1" TestResult : produces
+    Project "1" --> "0..*" Notifier : notifies via
+    Notifier <|-- SlackNotifier
+    Notifier <|-- EmailNotifier
