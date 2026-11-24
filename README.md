@@ -1,76 +1,45 @@
 ```mermaid
-classDiagram
-    class Project {
-        -projectId: str
-        +name: str
-    }
-    class TestNode {
-        <<abstract>>
-        +name: str
-        +run()* TestResult
-    }
-    class TestSuite {
-        +add(node: TestNode)
-        +run() TestResult
-    }
-    class TestCase {
-        -timeoutSeconds: int = 30
-        +run() TestResult
-    }
-    class TestResult {
-        +passed: bool
-        +duration: float
-        #errorLog: str
-    }
-    class TestRunner {
-        -strategy: SchedulingStrategy
-        +setStrategy(strategy: SchedulingStrategy)
-        +execute()
-    }
-    class SchedulingStrategy {
-        <<interface>>
-        +schedule(cases: list)
-    }
-    class ParallelStrategy {
-        -maxWorkers: int
-        +schedule(cases: list)
-    }
-    class PriorityStrategy {
-        -minPriority: int
-        +schedule(cases: list)
-    }
-    class WorkerNode {
-        #ipAddress: str
-        #isBusy: bool
-    }
-    class Notifier {
-        <<abstract>>
-        #endpoint: str
-        +send(result: TestResult)* bool
-        +formatSummary(result: TestResult) str
-    }
-    class SlackNotifier {
-        -channel: str
-        +send(result: TestResult) bool
-    }
-    class EmailNotifier {
-        -recipients: list
-        +send(result: TestResult) bool
-    }
+sequenceDiagram
+    actor Customer
+    participant orderCtrl as orderCtrl : OrderController
+    participant lockService as lockService : RedisLock
+    participant invService as invService : InventoryService
+    participant mq as mq : MessageQueue
 
-    Project "1" *-- "1..*" TestSuite : contains
-    TestNode <|-- TestSuite
-    TestNode <|-- TestCase
-    TestSuite "1" o-- "0..*" TestNode : aggregates
+    Customer->>+orderCtrl: submitOrder(cartItems)
+    
+    %% 自调用校验
+    orderCtrl->>+orderCtrl: validateCart(cartItems)
+    orderCtrl-->>-orderCtrl: isValid
 
-    TestRunner "0..1" --> "0..*" TestCase : executes
-    TestRunner "1" o-- "1" SchedulingStrategy : uses
-    SchedulingStrategy <|.. ParallelStrategy
-    SchedulingStrategy <|.. PriorityStrategy
-    TestRunner "0..1" o-- "0..*" WorkerNode : manages
+    alt isValid == false
+        orderCtrl-->>Customer: return "Invalid Cart"
+    else isValid == true
+        orderCtrl->>+lockService: acquireLock(userId)
+        lockService-->>-orderCtrl: locked
 
-    TestCase "1" --> "1" TestResult : produces
-    Project "1" --> "0..*" Notifier : notifies via
-    Notifier <|-- SlackNotifier
-    Notifier <|-- EmailNotifier
+        alt locked == false
+            orderCtrl-->>Customer: return "System Busy"
+        else locked == true
+            loop for each item in cartItems
+                orderCtrl->>+invService: deductStock(item.id, item.qty)
+                invService-->>-orderCtrl: success
+            end
+
+            %% 动态创建订单对象
+            create participant newOrder as newOrder : Order
+            orderCtrl-->>newOrder: «create»
+
+            %% 异步消息通知 (开放箭头 -))
+            orderCtrl-)mq: publishOrderCreated(newOrder.id)
+
+            %% 释放锁并销毁生命线
+            orderCtrl->>+lockService: releaseLock(userId)
+            destroy lockService
+            lockService-->>-orderCtrl: released
+
+            orderCtrl-->>Customer: orderConfirmation
+        end
+    end
+    deactivate orderCtrl
 ```
